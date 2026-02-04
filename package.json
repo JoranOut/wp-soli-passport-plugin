@@ -1,0 +1,30 @@
+{
+  "name": "wp-soli-passport-plugin",
+  "version": "0.1.0",
+  "description": "OIDC identity provider plugin for admin.soli.nl",
+  "scripts": {
+    "wp-env:start": "wp-env start --debug",
+    "wp-env:stop": "wp-env stop",
+    "build:css": "npx tailwindcss -i ./src/css/admin.css -o ./assets/css/admin.css --minify",
+    "build": "npm run build:css",
+    "watch": "npx tailwindcss -i ./src/css/admin.css -o ./assets/css/admin.css --watch",
+    "publish": "npm run build && npm run i18n:build && node ./publish.js",
+    "test": "wp-scripts test-playwright",
+    "test:debug": "wp-scripts test-playwright --debug",
+    "test:headed": "wp-scripts test-playwright --headed",
+    "i18n:make-pot": "wp-env run cli -- bash -c 'php -d memory_limit=512M /usr/local/bin/wp i18n make-pot wp-content/plugins/wp-soli-passport-plugin wp-content/plugins/wp-soli-passport-plugin/languages/soli-passport.pot --domain=soli-passport --exclude=node_modules,e2e,test-results'",
+    "i18n:make-json": "wp-env run cli -- bash -c 'php -d memory_limit=512M /usr/local/bin/wp i18n make-json wp-content/plugins/wp-soli-passport-plugin/languages wp-content/plugins/wp-soli-passport-plugin/languages --no-purge'",
+    "i18n:build": "npm run i18n:make-pot && npm run i18n:make-json"
+  },
+  "keywords": [],
+  "author": "Joran Out",
+  "license": "GPL-2.0-or-later",
+  "devDependencies": {
+    "@wordpress/env": "latest",
+    "@wordpress/e2e-test-utils-playwright": "latest",
+    "@wordpress/scripts": "latest",
+    "archiver": "^7.0.1",
+    "daisyui": "^4.12.0",
+    "tailwindcss": "^3.4.0"
+  }
+}
