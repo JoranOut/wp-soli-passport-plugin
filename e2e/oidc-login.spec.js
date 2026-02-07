@@ -181,6 +181,42 @@ test.describe( 'OIDC Cancel and Retry', () => {
 	} );
 } );
 
+test.describe( 'SSO Bypass', () => {
+	test.beforeEach( async ( { context } ) => {
+		await context.clearCookies();
+	} );
+
+	test( 'can bypass SSO with ?bypass-sso parameter', async ( { page } ) => {
+		// Go to client login with bypass-sso parameter
+		await page.goto( `${ OIDC_CLIENT }/wp-login.php?bypass-sso` );
+
+		// Should NOT be redirected to provider - should stay on client login page
+		await expect( page ).toHaveURL( /localhost:8888/ );
+
+		// Should see the WordPress login form (not auto-redirected)
+		await expect( page.locator( '#user_login' ) ).toBeVisible();
+		await expect( page.locator( '#user_pass' ) ).toBeVisible();
+
+		// Login with local WordPress credentials
+		await page.locator( '#user_login' ).fill( 'admin' );
+		await page.locator( '#user_pass' ).fill( 'password' );
+		await page.locator( '#wp-submit' ).click();
+
+		// Should be logged in on the client
+		await expect( page ).toHaveURL( /localhost:8888/ );
+		await page.goto( `${ OIDC_CLIENT }/wp-admin/` );
+		await expect( page.locator( '#wpadminbar' ) ).toBeVisible();
+	} );
+
+	test( 'without bypass-sso, auto-redirects to OIDC provider', async ( { page } ) => {
+		// Go to client login WITHOUT bypass-sso parameter
+		await page.goto( `${ OIDC_CLIENT }/wp-login.php` );
+
+		// Should be auto-redirected to provider (SSO mode)
+		await expect( page ).toHaveURL( /localhost:8889/, { timeout: 5000 } );
+	} );
+} );
+
 test.describe( 'OIDC Role Resolution', () => {
 	test.beforeEach( async ( { context } ) => {
 		await context.clearCookies();
