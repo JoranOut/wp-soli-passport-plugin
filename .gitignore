@@ -18,3 +18,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Claude/Playwright MCP
+.claude/
+.playwright-mcp/

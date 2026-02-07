@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/wp-env.json",
+  "core": null,
+  "phpVersion": "8.3",
+  "env": {
+    "development": {
+      "plugins": [
+        ".",
+        "https://downloads.wordpress.org/plugin/daggerhart-openid-connect-generic.zip"
+      ],
+      "themes": [],
+      "config": {
+        "WP_DEBUG": true,
+        "WP_DEBUG_DISPLAY": true,
+        "WP_DEBUG_LOG": true,
+        "WP_MEMORY_LIMIT": "512M",
+        "WP_SITEURL": "http://localhost:8888",
+        "WP_HOME": "http://localhost:8888"
+      }
+    },
+    "tests": {
+      "plugins": [
+        ".",
+        "https://downloads.wordpress.org/plugin/openid-connect-server.zip"
+      ],
+      "themes": [],
+      "config": {
+        "WP_DEBUG": true,
+        "WP_DEBUG_DISPLAY": true,
+        "WP_DEBUG_LOG": true,
+        "WP_MEMORY_LIMIT": "512M",
+        "WP_SITEURL": "http://localhost:8889",
+        "WP_HOME": "http://localhost:8889"
+      },
+      "mappings": {
+        "wp-content/oidc-keys": "./.oidc-keys",
+        "wp-content/mu-plugins/oidc-keys-loader.php": "./.oidc-keys/oidc-keys-loader.php"
+      }
+    }
+  },
+  "lifecycleScripts": {
+    "afterStart": "bash .wp-env-setup.sh"
+  }
+}

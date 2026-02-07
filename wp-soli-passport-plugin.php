@@ -31,6 +31,7 @@ require_once SOLI_PASSPORT__PLUGIN_DIR_PATH . 'includes/class-soli-passport-admi
 require_once SOLI_PASSPORT__PLUGIN_DIR_PATH . 'includes/class-soli-passport-menu.php';
 require_once SOLI_PASSPORT__PLUGIN_DIR_PATH . 'includes/oidc/class-soli-passport-oidc.php';
 require_once SOLI_PASSPORT__PLUGIN_DIR_PATH . 'includes/oidc/class-soli-passport-roles.php';
+require_once SOLI_PASSPORT__PLUGIN_DIR_PATH . 'includes/oidc/class-soli-passport-session-reset.php';
 
 // Load CLI commands
 require_once SOLI_PASSPORT__PLUGIN_DIR_PATH . 'includes/cli/class-soli-passport-test-data-cli.php';
@@ -104,6 +105,10 @@ if ( Dependency_Checker::is_oidc_server_active() ) {
 	// Initialize OIDC integration
 	$soli_passport_oidc = new OIDC\OIDC();
 	$soli_passport_oidc->init();
+
+	// Initialize session reset endpoint
+	$soli_passport_session_reset = new OIDC\Session_Reset();
+	$soli_passport_session_reset->init();
 }
 
 // Client mode: Role sync functionality

@@ -41,22 +41,29 @@ async function getResolvedRole( username, clientId ) {
 
 /**
  * Helper to complete OIDC login flow
+ * Works with both button mode and auto-login SSO mode
  */
 async function completeOidcFlow( page, username, password ) {
 	// Go to OIDC client login page
 	await page.goto( `${ OIDC_CLIENT }/wp-login.php` );
 
-	// Click the OpenID Connect login button
+	// With auto-login SSO, we should be auto-redirected to provider
+	// With button mode, we need to click the OpenID Connect button first
 	const oidcButton = page.locator( 'a' ).filter( { hasText: /OpenID Connect/i } );
-	await oidcButton.click();
+	if ( await oidcButton.isVisible( { timeout: 2000 } ).catch( () => false ) ) {
+		await oidcButton.click();
+	}
 
 	// Should be redirected to provider
-	await expect( page ).toHaveURL( /localhost:8889/ );
+	await expect( page ).toHaveURL( /localhost:8889/, { timeout: 5000 } );
 
-	// Login on the provider
-	await page.locator( '#user_login' ).fill( username );
-	await page.locator( '#user_pass' ).fill( password );
-	await page.locator( '#wp-submit' ).click();
+	// Login on the provider (if login form is shown)
+	const loginForm = page.locator( '#user_login' );
+	if ( await loginForm.isVisible( { timeout: 2000 } ).catch( () => false ) ) {
+		await page.locator( '#user_login' ).fill( username );
+		await page.locator( '#user_pass' ).fill( password );
+		await page.locator( '#wp-submit' ).click();
+	}
 
 	// Approve authorization if shown
 	const authorizeButton = page.locator( 'button, input[type="submit"]' ).filter( { hasText: /authorize|allow|approve/i } );
@@ -72,6 +79,8 @@ test.describe( 'OIDC Login Flow', () => {
 	test.beforeEach( async ( { context } ) => {
 		// Clear all cookies before each test to ensure clean state
 		await context.clearCookies();
+		// Clear the OIDC consent timestamp so the authorize page shows again
+		await wpCliProvider( 'user meta delete testuser oidc_consent_timestamp_soli-dev-client' ).catch( () => {} );
 	} );
 
 	test( 'testuser exists on OIDC provider', async ( { page } ) => {
@@ -100,9 +109,83 @@ test.describe( 'OIDC Login Flow', () => {
 	} );
 } );
 
+test.describe( 'OIDC Cancel and Retry', () => {
+	test.beforeEach( async ( { context } ) => {
+		await context.clearCookies();
+		// Destroy testuser's sessions on the provider to ensure they need to login
+		await wpCliProvider( 'user session destroy testuser --all' ).catch( () => {} );
+		// Delete testuser on client if exists (from previous test runs)
+		await wpCliClient( 'user delete testuser@soli.nl --yes' ).catch( () => {} );
+		// Clear the OIDC consent timestamp so the authorize page shows again
+		await wpCliProvider( 'user meta delete testuser oidc_consent_timestamp_soli-dev-client' ).catch( () => {} );
+	} );
+
+	test( 'cancel on authorize page logs out and allows retry', async ( { page } ) => {
+		// Step 1: Go to client login - should redirect to provider
+		await page.goto( `${ OIDC_CLIENT }/wp-login.php` );
+
+		// With auto-login (SSO), we should be redirected to provider automatically
+		await expect( page ).toHaveURL( /localhost:8889/, { timeout: 5000 } );
+
+		// Store the authorize URL params for later comparison
+		const authorizeUrl = page.url();
+
+		// Step 2: Login on the provider (if login form is shown)
+		const loginForm = page.locator( '#user_login' );
+		if ( await loginForm.isVisible( { timeout: 2000 } ).catch( () => false ) ) {
+			await page.locator( '#user_login' ).fill( 'testuser' );
+			await page.locator( '#user_pass' ).fill( 'testpass' );
+			await page.locator( '#wp-submit' ).click();
+		}
+
+		// Wait for navigation
+		await page.waitForLoadState( 'networkidle' );
+
+		// Step 3: Should see authorize page - find and click Cancel (it's a link)
+		// If already authorized, the test can't proceed - skip in that case
+		const cancelLink = page.locator( 'a' ).filter( { hasText: 'Cancel' } );
+		await expect( cancelLink ).toBeVisible( { timeout: 5000 } );
+
+		// Verify the Cancel link was modified by our JavaScript to go through reset endpoint
+		const cancelHref = await cancelLink.getAttribute( 'href' );
+		expect( cancelHref ).toContain( 'soli_passport_action=reset' );
+
+		await cancelLink.click();
+
+		// Step 4: Should be redirected back to login form on provider (logged out)
+		// The reset endpoint logs out and redirects back to the authorize URL
+		await expect( page ).toHaveURL( /localhost:8889/, { timeout: 5000 } );
+		await expect( page ).toHaveURL( /openid-connect/ );
+
+		// Should see login form again (because we're logged out)
+		await expect( page.locator( '#user_login' ) ).toBeVisible( { timeout: 5000 } );
+
+		// Step 5: Login again
+		await page.locator( '#user_login' ).fill( 'testuser' );
+		await page.locator( '#user_pass' ).fill( 'testpass' );
+		await page.locator( '#wp-submit' ).click();
+
+		// Step 6: Should see authorize page again
+		const authorizeButton = page.locator( 'button, input[type="submit"]' ).filter( { hasText: 'Authorize' } );
+		await expect( authorizeButton ).toBeVisible( { timeout: 5000 } );
+
+		// Step 7: This time authorize
+		await authorizeButton.click();
+
+		// Should be redirected back to client and logged in
+		await expect( page ).toHaveURL( /localhost:8888/, { timeout: 10000 } );
+
+		// Verify we're logged in
+		await page.goto( `${ OIDC_CLIENT }/wp-admin/` );
+		await expect( page.locator( '#wpadminbar' ) ).toBeVisible();
+	} );
+} );
+
 test.describe( 'OIDC Role Resolution', () => {
 	test.beforeEach( async ( { context } ) => {
 		await context.clearCookies();
+		// Clear the OIDC consent timestamp so the authorize page shows again
+		await wpCliProvider( 'user meta delete testuser oidc_consent_timestamp_soli-dev-client' ).catch( () => {} );
 	} );
 
 	test( 'user gets role from WP role mapping', async ( { page } ) => {

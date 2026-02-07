@@ -64,7 +64,8 @@ wp-soli-passport-plugin/
 │   │   └── class-soli-passport-role-mappings-table.php
 │   ├── oidc/
 │   │   ├── class-soli-passport-oidc.php
-│   │   └── class-soli-passport-roles.php
+│   │   ├── class-soli-passport-roles.php
+│   │   └── class-soli-passport-session-reset.php
 │   └── admin/pages/
 │       ├── class-soli-passport-clients.php
 │       ├── class-soli-passport-user-roles.php
@@ -206,6 +207,51 @@ Hooks into the OpenID Connect Server plugin:
 - `oidc_registered_clients` - Registers clients from database
 - `oidc_user_claims` - Adds role, groups, instruments claims
 - `rest_pre_dispatch` - Tracks client_id during auth flow
+
+## Session Reset Endpoint
+
+When users get stuck in the OIDC flow (e.g., after denying authorization or encountering an error), they can clear their session using the reset endpoint.
+
+### URL Format
+
+```
+https://provider-domain.com/?soli_passport_action=reset
+```
+
+With optional redirect:
+```
+https://provider-domain.com/?soli_passport_action=reset&redirect_uri=https://client-app.com/
+```
+
+### Behavior
+
+1. **With `redirect_uri`**: Logs out user and redirects to the specified URI (must be same-site or a registered client's redirect URI)
+2. **Without `redirect_uri`**: Shows a confirmation page with options to:
+   - Log in again
+   - Return to the client application (if referer is detected)
+   - Go to homepage
+
+### PHP Helper
+
+```php
+use Soli\Passport\OIDC\Session_Reset;
+
+// Get reset URL
+$reset_url = Session_Reset::get_reset_url();
+
+// Get reset URL with redirect
+$reset_url = Session_Reset::get_reset_url( 'https://client-app.com/' );
+```
+
+### Client Integration
+
+Client applications can include a "Try again" link in their error handling:
+
+```php
+// On the client side, when OIDC error is detected
+$provider_reset_url = 'https://admin.soli.nl/?soli_passport_action=reset&redirect_uri=' . urlencode( home_url( '/login/' ) );
+echo '<a href="' . esc_url( $provider_reset_url ) . '">Clear session and try again</a>';
+```
 
 ## Security
 
