@@ -17,6 +17,10 @@ echo "=== Setting up wp-env OIDC testing environments ==="
 echo ""
 echo "--- Configuring Tests Environment (OIDC Provider - localhost:8889) ---"
 
+# Patch OpenID Connect Server Router.php for PHP 8.3 compatibility
+# wp_parse_url() returns null when site is at root, causing str_replace(null, ...) deprecation
+wp-env run tests-cli -- bash -c "sed -i \"s/\\\$installed_dir = wp_parse_url( \\\$wp_url, PHP_URL_PATH );/\\\$installed_dir = wp_parse_url( \\\$wp_url, PHP_URL_PATH ) ?? '';/\" /var/www/html/wp-content/plugins/openid-connect-server/src/Http/Router.php"
+
 # Activate plugins - passport first, then admin (if available), then OIDC server
 wp-env run tests-cli wp plugin activate wp-soli-passport-plugin
 wp-env run tests-cli wp plugin activate wp-soli-admin-plugin 2>/dev/null || echo "Admin plugin not available (standalone mode)"
@@ -180,9 +184,10 @@ wp-env run cli wp option update openid_connect_generic_settings '{
   "client_secret": "dev-secret-12345",
   "scope": "openid email profile",
   "endpoint_login": "http://localhost:8889/?rest_route=/openid-connect/authorize",
-  "endpoint_userinfo": "http://host.docker.internal:8889/?rest_route=/openid-connect/userinfo",
-  "endpoint_token": "http://host.docker.internal:8889/?rest_route=/openid-connect/token",
+  "endpoint_userinfo": "http://tests-wordpress/?rest_route=/openid-connect/userinfo",
+  "endpoint_token": "http://tests-wordpress/?rest_route=/openid-connect/token",
   "endpoint_end_session": "http://localhost:8889/wp-login.php?action=logout",
+  "jwks_uri": "http://tests-wordpress/.well-known/jwks.json",
   "acr_values": "",
   "enable_logging": "1",
   "log_limit": "1000",
