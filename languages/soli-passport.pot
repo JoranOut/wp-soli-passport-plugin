@@ -1,0 +1,46 @@
+# Copyright (C) 2026 Joran Out
+# This file is distributed under the same license as the Soli Passport Plugin plugin.
+msgid ""
+msgstr ""
+"Project-Id-Version: Soli Passport Plugin 0.1.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/wp-soli-passport-plugin\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-07-30T19:44:22+00:00\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"X-Generator: WP-CLI 2.12.0\n"
+"X-Domain: soli-passport\n"
+
+#. Plugin Name of the plugin
+#: wp-soli-passport-plugin.php
+msgid "Soli Passport Plugin"
+msgstr ""
+
+#. Description of the plugin
+#: wp-soli-passport-plugin.php
+msgid "OIDC client adapter for Soli: syncs roles and assignments from the admin.soli.nl identity provider"
+msgstr ""
+
+#. Author of the plugin
+#: wp-soli-passport-plugin.php
+msgid "Joran Out"
+msgstr ""
+
+#: includes/class-soli-passport-dependency-checker.php:40
+msgid "Soli Passport"
+msgstr ""
+
+#: includes/class-soli-passport-dependency-checker.php:41
+msgid "requires the OpenID Connect Generic plugin to be installed and activated. Without it, roles and assignments are not synced from the identity provider."
+msgstr ""
+
+#: includes/client/class-soli-passport-role-sync.php:280
+msgid "Your Soli account does not have access to this site."
+msgstr ""
+
+#: includes/client/class-soli-passport-role-sync.php:287
+msgid "Sign in with a different account"
+msgstr ""

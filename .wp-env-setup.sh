@@ -1,225 +1,104 @@
 #!/bin/bash
 #
-# wp-env setup script for OIDC testing
+# wp-env setup script
 #
-# This script runs after wp-env start and configures:
-# - Tests environment (8889): OIDC Provider with test data
-# - Development environment (8888): OIDC Client connected to provider
+# Runs after `wp-env start` and configures the development environment (8888) as an
+# OIDC client of the stub provider that is mapped in at /oidc-stub.
 #
+# The tests environment (8889) is only used for PHPUnit and needs no OIDC config.
+#
+# Browser-facing endpoints use the published port (8888 by default), server-to-server
+# endpoints use localhost (port 80 inside the container). Keeping those apart is what
+# lets this run identically on a laptop and in CI - no cross-container networking and
+# no host.docker.internal involved.
 
 set -e
 
-echo "=== Setting up wp-env OIDC testing environments ==="
+# Honour the same port override wp-env itself uses, so this works alongside other
+# wp-env projects: WP_ENV_PORT=8886 npm run wp-env:start
+CLIENT_PORT="${WP_ENV_PORT:-8888}"
 
-# =============================================================================
-# TESTS ENVIRONMENT (OIDC Provider) - localhost:8889
-# =============================================================================
+STUB_BROWSER_BASE="http://localhost:${CLIENT_PORT}/oidc-stub/stub-provider/index.php"
+STUB_INTERNAL_BASE="http://localhost/oidc-stub/stub-provider/index.php"
+
+echo "=== Setting up wp-env OIDC client environment ==="
+
+# -----------------------------------------------------------------------------
+# Stub provider signing keys (generated locally, never committed)
+# -----------------------------------------------------------------------------
+bash ./tests/stub-provider/generate-keys.sh
+
+# -----------------------------------------------------------------------------
+# PHPUnit dependency for the unit suite
+# -----------------------------------------------------------------------------
+# The WordPress test suite needs PHPUnit 9 and the Yoast polyfills. Both go into
+# the container instead of a composer.json here, so the plugin itself stays free
+# of Composer dependencies. See tests/install-test-deps.sh for the version pins.
+wp-env run tests-cli -- bash /var/www/html/wp-content/plugins/wp-soli-passport-plugin/tests/install-test-deps.sh
+
+# -----------------------------------------------------------------------------
+# Development environment (OIDC client)
+# -----------------------------------------------------------------------------
 echo ""
-echo "--- Configuring Tests Environment (OIDC Provider - localhost:8889) ---"
+echo "--- Configuring OIDC client (port ${CLIENT_PORT}) ---"
 
-# Activate plugins - passport first, then admin (if available), then OIDC server
-wp-env run tests-cli wp plugin activate wp-soli-passport-plugin
-wp-env run tests-cli wp plugin activate wp-soli-admin-plugin 2>/dev/null || echo "Admin plugin not available (standalone mode)"
-wp-env run tests-cli wp plugin activate openid-connect-server
+# After a core update an existing database serves the "Database Update Required"
+# screen instead of wp-admin, which looks exactly like a broken login.
+wp-env run cli wp core update-db
 
-# Insert passport test data (OIDC clients and role mappings)
-wp-env run tests-cli wp soli-passport test-data insert
-
-# Insert admin test data if admin plugin is active
-wp-env run tests-cli wp soli test-data insert 2>/dev/null || echo "Admin test data not inserted (admin plugin not active)"
-
-# Update admin user with name fields (required for OIDC claims)
-wp-env run tests-cli wp user update admin --first_name=Admin --last_name=User --display_name="Admin User"
-
-# Create test user for E2E testing
-wp-env run tests-cli wp user create testuser testuser@soli.nl --user_pass=testpass --role=subscriber --first_name=Test --last_name=User --display_name="Test User" 2>/dev/null || echo "Test user already exists"
-
-# Create relatie for testuser with lid type, group membership, and instrument (enhanced mode)
-wp-env run tests-cli wp eval '
-global $wpdb;
-
-// Check if admin plugin is active (relaties table exists)
-$relaties_table = $wpdb->prefix . "soli_relaties";
-$table_exists = $wpdb->get_var($wpdb->prepare(
-    "SHOW TABLES LIKE %s",
-    $relaties_table
-)) === $relaties_table;
-
-if (!$table_exists) {
-    echo "Admin plugin not active - skipping relatie creation (standalone mode)\n";
-    return;
-}
-
-// Get testuser WP user ID
-$user = get_user_by("login", "testuser");
-if (!$user) {
-    echo "Testuser WP user not found\n";
-    return;
-}
-$wp_user_id = $user->ID;
-
-// Check if testuser relatie already exists (by wp_user_id)
-$existing = $wpdb->get_var($wpdb->prepare(
-    "SELECT id FROM {$relaties_table} WHERE wp_user_id = %d LIMIT 1",
-    $wp_user_id
-));
-
-if ($existing) {
-    echo "Testuser relatie already exists (ID: {$existing})\n";
-    return;
-}
-
-// Also check by email
-$email_table = $wpdb->prefix . "soli_email";
-$existing_by_email = $wpdb->get_var($wpdb->prepare(
-    "SELECT relatie_id FROM {$email_table} WHERE email = %s LIMIT 1",
-    "testuser@soli.nl"
-));
-
-if ($existing_by_email) {
-    // Link existing relatie to wp_user_id
-    $wpdb->update($relaties_table,
-        array("wp_user_id" => $wp_user_id),
-        array("id" => $existing_by_email)
-    );
-    echo "Linked existing relatie (ID: {$existing_by_email}) to wp_user_id {$wp_user_id}\n";
-    return;
-}
-
-// Get next relatie_id
-$max_relatie_id = (int) $wpdb->get_var("SELECT COALESCE(MAX(relatie_id), 0) FROM {$relaties_table}");
-$next_relatie_id = $max_relatie_id + 1;
-
-// Create relatie for testuser
-$wpdb->insert($relaties_table, array(
-    "relatie_id" => $next_relatie_id,
-    "wp_user_id" => $wp_user_id,
-    "voornaam" => "Test",
-    "achternaam" => "User",
-    "roepnaam" => "Test",
-    "geslacht" => "O",
-    "actief" => 1,
-));
-$id = $wpdb->insert_id;
-echo "Created relatie ID: {$id} (relatie_id: {$next_relatie_id}) with wp_user_id: {$wp_user_id}\n";
-
-// Link email to relatie
-$wpdb->insert($email_table, array(
-    "relatie_id" => $id,
-    "email" => "testuser@soli.nl",
-    "van" => date("Y-m-d"),
-));
-echo "Linked email to relatie\n";
-
-// Get "lid" relation type
-$types_table = $wpdb->prefix . "soli_relatie_types";
-$lid_type_id = $wpdb->get_var("SELECT id FROM {$types_table} WHERE naam = \"lid\" LIMIT 1");
-
-if ($lid_type_id) {
-    // Assign lid type to relatie
-    $relatie_type_table = $wpdb->prefix . "soli_relatie_relatie_type";
-    $wpdb->insert($relatie_type_table, array(
-        "relatie_id" => $id,
-        "relatie_type_id" => $lid_type_id,
-        "van" => date("Y-m-d"),
-    ));
-    echo "Assigned lid type to relatie\n";
-}
-
-// Get "Harmonie orkest" group (or first available orkest)
-$onderdelen_table = $wpdb->prefix . "soli_onderdelen";
-$onderdeel = $wpdb->get_row("SELECT id, naam FROM {$onderdelen_table} WHERE naam = \"Harmonie orkest\" OR onderdeel_type = \"orkest\" ORDER BY naam = \"Harmonie orkest\" DESC LIMIT 1");
-
-if ($onderdeel) {
-    // Assign to group
-    $relatie_onderdeel_table = $wpdb->prefix . "soli_relatie_onderdeel";
-    $wpdb->insert($relatie_onderdeel_table, array(
-        "relatie_id" => $id,
-        "onderdeel_id" => $onderdeel->id,
-        "van" => date("Y-m-d"),
-    ));
-    echo "Assigned to group: {$onderdeel->naam}\n";
-}
-
-// Assign instrument (Trompet) for the group
-if ($onderdeel) {
-    $relatie_instrument_table = $wpdb->prefix . "soli_relatie_instrument";
-    $wpdb->insert($relatie_instrument_table, array(
-        "relatie_id" => $id,
-        "onderdeel_id" => $onderdeel->id,
-        "instrument_type" => "Trompet",
-        "van" => date("Y-m-d"),
-    ));
-    echo "Assigned instrument: Trompet in {$onderdeel->naam}\n";
-}
-
-echo "Testuser relatie setup complete!\n";
-'
-
-# Enable pretty permalinks (required for REST API endpoints)
-# --hard flag is required to write .htaccess in Docker environment
-wp-env run tests-cli wp rewrite structure '/%postname%/' --hard
-
-echo "Tests environment configured."
-
-# =============================================================================
-# DEVELOPMENT ENVIRONMENT (OIDC Client) - localhost:8888
-# =============================================================================
-echo ""
-echo "--- Configuring Development Environment (OIDC Client - localhost:8888) ---"
-
-# Activate plugins - passport plugin and OIDC client
 wp-env run cli wp plugin activate wp-soli-passport-plugin
 wp-env run cli wp plugin activate daggerhart-openid-connect-generic
 
-# Configure OIDC client settings to connect to the provider (8889)
-# The openid-connect-generic plugin stores settings in the 'openid_connect_generic_settings' option
+# Pretty permalinks, so the OIDC callback and login URLs behave like production.
+wp-env run cli wp rewrite structure '/%postname%/'
+wp-env run cli wp rewrite flush
+
+# See OpenID_Connect_Generic::bootstrap() for the full list of settings keys.
+#
+# Notable choices:
+#   scope                requests 'roles' and 'assignments'; without them the
+#                        provider omits those claims entirely
+#   endpoint_jwks        enables RS256 signature verification (without it the
+#                        client logs a security warning and trusts the token)
+#   issuer               fixed value the stub signs its tokens with
+#   allow_internal_idp   permits server-side calls to localhost, which
+#                        wp_safe_remote_get() would otherwise block
+#   link_existing_users  off, so users are matched on the 'sub' claim only and
+#                        two provider accounts sharing an email stay separate
 wp-env run cli wp option update openid_connect_generic_settings '{
   "login_type": "auto",
   "client_id": "soli-dev-client",
   "client_secret": "dev-secret-12345",
-  "scope": "openid email profile",
-  "endpoint_login": "http://localhost:8889/?rest_route=/openid-connect/authorize",
-  "endpoint_userinfo": "http://host.docker.internal:8889/?rest_route=/openid-connect/userinfo",
-  "endpoint_token": "http://host.docker.internal:8889/?rest_route=/openid-connect/token",
-  "endpoint_end_session": "http://localhost:8889/wp-login.php?action=logout",
-  "acr_values": "",
-  "enable_logging": "1",
-  "log_limit": "1000",
-  "link_existing_users": "1",
-  "create_if_does_not_exist": "1",
-  "redirect_user_back": "1",
-  "redirect_on_logout": "1",
-  "enforce_privacy": "0",
-  "alternate_redirect_uri": "0",
-  "identity_key": "nickname",
-  "nickname_key": "nickname",
+  "scope": "openid email profile roles assignments",
+  "endpoint_login": "'"${STUB_BROWSER_BASE}"'?action=authorize",
+  "endpoint_token": "'"${STUB_INTERNAL_BASE}"'?action=token",
+  "endpoint_userinfo": "'"${STUB_INTERNAL_BASE}"'?action=userinfo",
+  "endpoint_jwks": "'"${STUB_INTERNAL_BASE}"'?action=jwks",
+  "endpoint_end_session": "'"${STUB_BROWSER_BASE}"'?action=logout",
+  "issuer": "https://stub-provider.test",
+  "jwks_cache_ttl": 3600,
+  "allow_internal_idp": 1,
+  "identity_key": "preferred_username",
+  "nickname_key": "preferred_username",
   "email_format": "{email}",
   "displayname_format": "{given_name} {family_name}",
-  "identify_with_username": "1",
-  "state_time_limit": "300",
-  "token_refresh_enable": "1",
-  "http_request_timeout": "5",
-  "enable_sso": "1"
+  "identify_with_username": false,
+  "link_existing_users": 0,
+  "create_if_does_not_exist": 1,
+  "redirect_user_back": 0,
+  "enable_logging": 1,
+  "log_limit": 1000
 }' --format=json
 
-echo "Development environment configured."
+echo "OIDC client configured."
 
-# =============================================================================
-# SUMMARY
-# =============================================================================
 echo ""
 echo "=== Setup Complete ==="
 echo ""
-echo "OIDC Provider (tests):     http://localhost:8889"
-echo "  - Admin:                 admin / password"
-echo "  - Test user:             testuser / testpass"
+echo "WordPress client:   http://localhost:${CLIENT_PORT}"
+echo "  - Local login:    http://localhost:${CLIENT_PORT}/wp-login.php?bypass-sso (admin / password)"
+echo "  - SSO login:      http://localhost:${CLIENT_PORT}/wp-login.php (redirects to the stub provider)"
 echo ""
-echo "OIDC Client (development): http://localhost:8888"
-echo "  - Admin:                 admin / password"
-echo "  - Login with OIDC:       Auto-redirects to provider (SSO)"
-echo ""
-echo "OIDC Client Credentials:"
-echo "  - Client ID:             soli-dev-client"
-echo "  - Client Secret:         dev-secret-12345"
+echo "Stub provider:      ${STUB_BROWSER_BASE}?action=openid-configuration"
+echo "  - Accounts come from tests/fixtures/oidc-claims.json"
 echo ""

@@ -1,176 +1,179 @@
 # wp-soli-passport-plugin
 
-WordPress plugin for OIDC identity provider functionality for Soli.
+WordPress-side adapter for Soli single sign-on.
 
 ## Purpose
 
-This plugin provides OAuth/OpenID Connect identity provider functionality:
+The identity provider is `laravel-soli-administration` (Laravel Passport + OIDC), serving
+`admin.soli.nl`. It owns the OAuth clients, the role mappings and the per-user overrides, and
+resolves one role per user per client.
 
-1. **OIDC Client Management** - Register and manage OAuth clients
-2. **Role Mappings** - Configure role assignments based on relation types or WP roles
-3. **User Overrides** - Assign specific roles to individual users
-4. **Dual-Mode Operation** - Works standalone or enhanced with wp-soli-admin-plugin
+This plugin is the WordPress end of that: it applies the provider's decision locally and
+nothing more.
+
+1. **Role sync** - the granted role becomes the local WordPress role
+2. **Access control** - no granted role means the login is refused
+3. **Assignments** - orchestra/instrument data stored as user meta for other Soli plugins
+4. **Login page handling** - SSO bypass and recovery from a failed SSO login
+
+> This plugin used to be an identity provider itself, backed by its own tables and admin
+> pages, with an optional bridge to the (now retired) `wp-soli-admin-plugin`. All of that
+> moved to the Laravel app; nothing of it remains here.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    wp-soli-passport-plugin                      │
-│                                                                 │
-│  ┌─────────────────┐     ┌──────────────────────────────────┐  │
-│  │ Standalone Mode │     │ Enhanced Mode (admin installed)  │  │
-│  │                 │     │                                  │  │
-│  │ WP Role → Role  │     │ Relatie Type → Role              │  │
-│  │ mapping         │     │ + Groups/Instruments claims      │  │
-│  │                 │     │ + WP Role fallback               │  │
-│  └─────────────────┘     └──────────────────────────────────┘  │
-│                                     │                           │
-│                                     ▼                           │
-│                          ┌──────────────────┐                   │
-│                          │  Admin Bridge    │                   │
-│                          │  (optional link) │                   │
-│                          └────────┬─────────┘                   │
-└───────────────────────────────────┼─────────────────────────────┘
-                                    │ (if installed)
-                                    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    wp-soli-admin-plugin                         │
-│                                                                 │
-│  Relaties │ Onderdelen │ Instruments │ Relatie Types │ etc.    │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  laravel-soli-administration  (admin.soli.nl)                    │
+│                                                                  │
+│  oauth_clients + OauthClientSetting                              │
+│  ClientRoleMapping / OauthClientUserRole                         │
+│  ClientRoleResolver  ──►  one role per (user, client)            │
+│  SoliIdentityEntity  ──►  claims, gated on scope                │
+└───────────────────────────────┬──────────────────────────────────┘
+                                │ OIDC authorization code flow
+                                ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  WordPress site (soli.nl, muziek.soli.nl, ...)                   │
+│                                                                  │
+│  ┌────────────────────────────────┐                              │
+│  │ OpenID Connect Generic plugin  │  protocol, JWKS verification,│
+│  │ (daggerhart)                   │  user lookup by 'sub'        │
+│  └───────────────┬────────────────┘                              │
+│                  │ filters / actions                             │
+│                  ▼                                               │
+│  ┌────────────────────────────────┐                              │
+│  │ wp-soli-passport-plugin        │  role sync, access control,  │
+│  │ Client\Role_Sync               │  assignments meta            │
+│  └────────────────────────────────┘                              │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ## Plugin Structure
 
 ```
 wp-soli-passport-plugin/
-├── wp-soli-passport-plugin.php     # Main plugin file
-├── updater.php                      # GitHub updater
-├── uninstall.php                    # Cleanup on uninstall
-├── readme.md                        # Version info for updater
-├── CLAUDE.md                        # This documentation
-├── package.json                     # NPM dependencies
-├── tailwind.config.js               # Tailwind + DaisyUI config
-├── playwright.config.js             # E2E test configuration
-├── .wp-env.json                     # Local dev environment
+├── wp-soli-passport-plugin.php           # Main plugin file
+├── updater.php                            # GitHub updater
+├── uninstall.php                          # Removes synced user meta
+├── readme.md                              # Version info for updater
+├── CLAUDE.md                              # This documentation
+├── phpunit.xml.dist                       # Unit test configuration
+├── playwright.config.js                   # E2E test configuration
+├── .wp-env.json                           # Local dev environment
+├── .wp-env-setup.sh                       # Configures the client after start
 ├── includes/
-│   ├── class-soli-passport-menu.php
 │   ├── class-soli-passport-dependency-checker.php
-│   ├── class-soli-passport-admin-bridge.php
-│   ├── database/
-│   │   ├── class-soli-passport-database.php
-│   │   ├── class-soli-passport-clients-table.php
-│   │   ├── class-soli-passport-user-roles-table.php
-│   │   └── class-soli-passport-role-mappings-table.php
-│   ├── oidc/
-│   │   ├── class-soli-passport-oidc.php
-│   │   ├── class-soli-passport-roles.php
-│   │   └── class-soli-passport-session-reset.php
-│   └── admin/pages/
-│       ├── class-soli-passport-clients.php
-│       ├── class-soli-passport-user-roles.php
-│       └── class-soli-passport-role-mappings.php
-├── src/css/admin.css
-├── assets/
-│   ├── css/admin.css
-│   └── js/admin-tables.js
+│   └── client/
+│       └── class-soli-passport-role-sync.php
+├── tests/
+│   ├── bootstrap.php                      # WP test suite bootstrap
+│   ├── install-test-deps.sh               # PHPUnit toolchain in the container
+│   ├── fixtures/oidc-claims.json          # Golden claims from the provider
+│   ├── stub-provider/                     # Fake OIDC provider for tests
+│   └── unit/RoleSyncTest.php
 ├── languages/
-└── e2e/
+└── e2e/sso.spec.js
 ```
 
-## Database Tables
+There is no database schema, no admin page and no build step. Anything that looks like it
+needs one probably belongs in the Laravel app instead.
 
-### wp_soli_passport_clients
+## Claim Contract
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | bigint | Primary key |
-| client_id | varchar(100) | OAuth client identifier (unique) |
-| name | varchar(255) | Display name |
-| secret | varchar(255) | Client secret (hashed) |
-| redirect_uri | varchar(500) | Callback URL |
-| actief | tinyint(1) | Active status |
+Defined by `App\OpenId\SoliIdentityEntity::getClaims()` in the Laravel app. Claims are gated
+on scope, so the client's `scope` setting is part of the contract:
 
-### wp_soli_passport_user_roles
+| Claim | Scope | Type | Meaning |
+|-------|-------|------|---------|
+| `sub` | always | string | Laravel user ID; the only identity key used |
+| `name`, `preferred_username`, `given_name`, `family_name` | `profile` | string | Display data |
+| `email`, `email_verified` | `email` | string, bool | |
+| `roles` | `roles` | string[] | At most one entry. **Empty array means no access.** |
+| `assignments` | `assignments` | array[] | `onderdeel_id`, `instrument_soort_id`, `instrument_soort`, `instrument_familie` |
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | bigint | Primary key |
-| wp_user_id | bigint | WordPress user ID (nullable) |
-| relatie_id | bigint | Relatie ID (nullable, admin plugin) |
-| client_id | varchar(100) | OAuth client identifier |
-| role | varchar(100) | Role override |
+`tests/fixtures/oidc-claims.json` mirrors this and drives both test suites. When the provider
+changes what it emits, update that fixture first - the tests are written so it fails loudly.
 
-### wp_soli_passport_role_mappings
+## Role Resolution
 
-Dual-mode schema supporting both WP roles and relation types:
+All resolution happens on the provider (`App\Services\ClientRoleResolver`): user override →
+active relatie type mapping by priority → the client's default role → no access.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | bigint | Primary key |
-| client_id | varchar(100) | OAuth client identifier |
-| mapping_type | enum | 'wp_role' or 'relatie_type' |
-| wp_role | varchar(100) | WordPress role (nullable) |
-| relatie_type_id | bigint | Relation type ID (nullable) |
-| role | varchar(100) | Role to assign |
-| priority | int | Priority for this mapping |
+WordPress only interprets the result:
 
-## Key Components
+| `roles` claim | Result |
+|---------------|--------|
+| `["editor"]` and `editor` exists in WP | Role applied |
+| `[]` | Login refused, no user created |
+| absent | Login refused - the `roles` scope was not requested |
+| `["ledenadministratie"]` (not a WP role) | Login refused - this client is not configured on the provider, so the provider fell back to its own application roles |
 
-### Dependency Checker
+Deliberately fails closed. `wp-login.php?bypass-sso` remains available so an administrator is
+never locked out by a misconfigured client.
 
-Shows admin notices based on plugin status:
-- **Error** if openid-connect-server not installed (required)
-- **Info** if wp-soli-admin-plugin not installed (standalone mode notice)
+## Client Settings
 
-### Admin Bridge
+The settings the OIDC client plugin needs; `.wp-env-setup.sh` writes the same set for local
+development. Anything not listed can stay at its default.
 
-Safe wrapper for accessing admin plugin data (returns empty arrays/null if not installed):
+| Setting | Value | Why |
+|---------|-------|-----|
+| `scope` | `openid email profile roles assignments` | Claims are scope-gated |
+| `endpoint_login` | `https://admin.soli.nl/oauth/authorize` | |
+| `endpoint_token` | `https://admin.soli.nl/oauth/token` | |
+| `endpoint_userinfo` | `https://admin.soli.nl/oauth/userinfo` | |
+| `endpoint_jwks` | `https://admin.soli.nl/oauth/jwks` | **Required.** Without it the client does not verify token signatures |
+| `endpoint_end_session` | `https://admin.soli.nl/oauth/logout` | Accepts `redirect_uri` for `*.soli.nl` hosts |
+| `link_existing_users` | off | Users are matched on `sub`; linking on email collapses two provider accounts that share an address |
+| `login_type` | `auto` | Redirect straight to the provider |
+
+## Hooks Used
+
+From the OpenID Connect Generic plugin:
+
+- `openid-connect-generic-user-login-test` - refuse the login when no role was granted
+- `openid-connect-generic-user-creation-test` - do not create a user who may not sign in
+- `openid-connect-generic-update-user-using-current-claim` - apply role and assignments
+- `openid-connect-generic-settings` - disable the SSO redirect for `?bypass-sso` and on errors
+
+## Reading Assignments From Another Plugin
 
 ```php
-Admin_Bridge::is_admin_plugin_active()
-Admin_Bridge::get_relatie_by_wp_user_id($user_id)
-Admin_Bridge::get_relatie_type_ids($relatie_id)
-Admin_Bridge::get_relatie_groups($relatie_id)
-Admin_Bridge::get_relatie_instruments($relatie_id)
-Admin_Bridge::get_all_relatie_types()
+use Soli\Passport\Client\Role_Sync;
+
+$assignments = Role_Sync::get_assignments( get_current_user_id() );
+// [ [ 'onderdeel_id' => 3, 'instrument_soort' => 'Trompet', ... ], ... ]
 ```
 
-### Role Resolution
+Returns an empty array when the user never signed in through the provider, or when the client
+does not request the `assignments` scope.
 
-```
-1. Check WP user-specific override
-2. IF admin plugin installed:
-   a. Find relatie for WP user (by wp_username)
-   b. Check relatie-specific override
-   c. Map relatie types → role (by priority)
-3. Map WP user roles → role (fallback, always available)
-4. Return "no-access" if no mapping found
-```
+## Testing
 
-## Dual-Mode Role Mappings
+Two layers, both runnable without the real provider.
 
-The role mappings table supports both modes:
-
-**Standalone mode (WP roles only):**
-```php
-// mapping_type = 'wp_role', wp_role = 'subscriber', relatie_type_id = NULL
+```bash
+npm run wp-env:start   # WordPress client + stub provider + PHPUnit toolchain
+npm run test           # unit + e2e
+npm run test:unit      # PHPUnit, claim contract and role logic
+npm run test:e2e       # Playwright, full browser SSO flow
 ```
 
-**Enhanced mode (relation types):**
-```php
-// mapping_type = 'relatie_type', wp_role = NULL, relatie_type_id = 5
-```
+**Unit tests** run against the WordPress test suite in the `tests-cli` container. PHPUnit 9
+and the Yoast polyfills are installed into that container by `tests/install-test-deps.sh`
+rather than a `composer.json`, so the plugin stays free of Composer dependencies. WordPress
+still calls `PHPUnit\Util\Test::parseTestMethodAnnotations()`, which PHPUnit 10 removed, hence
+the version pin.
 
-## Default WP Role Priorities
+**E2E tests** run against `tests/stub-provider/`, a small OIDC provider served from the same
+WordPress site at `/oidc-stub/`. Being same-origin is the point: browser-facing endpoints use
+the published port and server-to-server endpoints use `localhost` inside the container, so
+there is no cross-container networking and nothing depends on `host.docker.internal`. Its
+accounts are the fixture entries; `#stub-user-<key>` picks one.
 
-| WordPress Role | Default Priority |
-|----------------|------------------|
-| administrator  | 5 |
-| editor         | 4 |
-| author         | 3 |
-| contributor    | 2 |
-| subscriber     | 1 |
+Run alongside another wp-env project with `WP_ENV_PORT` / `WP_ENV_TESTS_PORT`; nothing
+hardcodes a port.
 
 ## Development Guidelines
 
@@ -180,82 +183,13 @@ The role mappings table supports both modes:
 - Function prefix: `soli_passport_`
 - Hook prefix: `soli_passport_`
 - Text domain: `soli-passport`
-- Table prefix: `soli_passport_`
+- User meta prefix: `soli_passport_`
 - Constants: `SOLI_PASSPORT__*`
 
-### Styling
+### Security
 
-Same as admin plugin: Tailwind CSS + DaisyUI
-
-### Testing
-
-```bash
-# Start environment (includes OIDC client on 8888, provider on 8889)
-npm run wp-env:start
-
-# Run tests
-npm run test
-
-# Run with browser visible
-npm run test:headed
-```
-
-## OIDC Integration
-
-Hooks into the OpenID Connect Server plugin:
-
-- `oidc_registered_clients` - Registers clients from database
-- `oidc_user_claims` - Adds role, groups, instruments claims
-- `rest_pre_dispatch` - Tracks client_id during auth flow
-
-## Session Reset Endpoint
-
-When users get stuck in the OIDC flow (e.g., after denying authorization or encountering an error), they can clear their session using the reset endpoint.
-
-### URL Format
-
-```
-https://provider-domain.com/?soli_passport_action=reset
-```
-
-With optional redirect:
-```
-https://provider-domain.com/?soli_passport_action=reset&redirect_uri=https://client-app.com/
-```
-
-### Behavior
-
-1. **With `redirect_uri`**: Logs out user and redirects to the specified URI (must be same-site or a registered client's redirect URI)
-2. **Without `redirect_uri`**: Shows a confirmation page with options to:
-   - Log in again
-   - Return to the client application (if referer is detected)
-   - Go to homepage
-
-### PHP Helper
-
-```php
-use Soli\Passport\OIDC\Session_Reset;
-
-// Get reset URL
-$reset_url = Session_Reset::get_reset_url();
-
-// Get reset URL with redirect
-$reset_url = Session_Reset::get_reset_url( 'https://client-app.com/' );
-```
-
-### Client Integration
-
-Client applications can include a "Try again" link in their error handling:
-
-```php
-// On the client side, when OIDC error is detected
-$provider_reset_url = 'https://admin.soli.nl/?soli_passport_action=reset&redirect_uri=' . urlencode( home_url( '/login/' ) );
-echo '<a href="' . esc_url( $provider_reset_url ) . '">Clear session and try again</a>';
-```
-
-## Security
-
-- Client secrets are hashed with `wp_hash_password()`
-- All forms use nonces
-- Capability checks (`manage_options`) on all admin pages
-- Prepared SQL statements throughout
+- All authorization decisions belong to the provider; do not add role logic here
+- Fail closed: an unreadable or unmapped claim must deny access, never grant a default
+- `endpoint_jwks` must be configured in every environment, otherwise ID token signatures go
+  unverified
+- Sanitize every claim value before storing it; claims are remote input
