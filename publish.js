@@ -56,18 +56,20 @@ archive.glob('**/*', {
         '**/node_modules/**',
         'package.json',
         'package-lock.json',
-        'src/**',
-        'tailwind.config.js',
         '.wp-env.json',
+        '.wp-env-setup.sh',
         '.gitignore',
         '*.zip',
         'publish.js',
         'e2e/**',
+        'tests/**',
+        'phpunit.xml.dist',
         'test-results/**',
         'playwright-report/**',
         'playwright.config.js',
         'artifacts/**',
         'CLAUDE.md',
+        'todo.md',
     ]
 });
 

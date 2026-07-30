@@ -22,3 +22,9 @@ Thumbs.db
 # Claude/Playwright MCP
 .claude/
 .playwright-mcp/
+
+# Stub OIDC provider signing keys (generated locally)
+tests/stub-provider/keys/
+
+# PHPUnit
+.phpunit.result.cache

@@ -1,0 +1,74 @@
+{
+  "_comment": "Golden claim fixtures mirroring App\\OpenId\\SoliIdentityEntity::getClaims() in laravel-soli-administration. Shared by the PHPUnit suite and the stub provider so both test against the same contract. Keep in sync with the provider; a change there should break a test here.",
+
+  "editor": {
+    "sub": "11",
+    "name": "Eva Editor",
+    "preferred_username": "Eva Editor",
+    "given_name": "Eva",
+    "family_name": "Editor",
+    "email": "eva.editor@example.com",
+    "email_verified": true,
+    "roles": [ "editor" ],
+    "assignments": [
+      {
+        "onderdeel_id": 3,
+        "instrument_soort_id": 12,
+        "instrument_soort": "Trompet",
+        "instrument_familie": "Koper"
+      },
+      {
+        "onderdeel_id": 5,
+        "instrument_soort_id": 20,
+        "instrument_soort": "Kleine trom",
+        "instrument_familie": "Slagwerk"
+      }
+    ]
+  },
+
+  "subscriber": {
+    "sub": "12",
+    "name": "Sander Subscriber",
+    "preferred_username": "Sander Subscriber",
+    "given_name": "Sander",
+    "family_name": "Subscriber",
+    "email": "sander.subscriber@example.com",
+    "email_verified": true,
+    "roles": [ "subscriber" ],
+    "assignments": []
+  },
+
+  "no-access": {
+    "sub": "13",
+    "name": "Nora NoAccess",
+    "preferred_username": "Nora NoAccess",
+    "given_name": "Nora",
+    "family_name": "NoAccess",
+    "email": "nora.noaccess@example.com",
+    "email_verified": true,
+    "roles": [],
+    "assignments": []
+  },
+
+  "unconfigured-client": {
+    "sub": "14",
+    "name": "Ulrike Unconfigured",
+    "preferred_username": "Ulrike Unconfigured",
+    "given_name": "Ulrike",
+    "family_name": "Unconfigured",
+    "email": "ulrike.unconfigured@example.com",
+    "email_verified": true,
+    "roles": [ "ledenadministratie" ],
+    "assignments": []
+  },
+
+  "no-roles-scope": {
+    "sub": "15",
+    "name": "Sam ScopeLess",
+    "preferred_username": "Sam ScopeLess",
+    "given_name": "Sam",
+    "family_name": "ScopeLess",
+    "email": "sam.scopeless@example.com",
+    "email_verified": true
+  }
+}

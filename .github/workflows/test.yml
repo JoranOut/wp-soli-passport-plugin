@@ -29,8 +29,11 @@ jobs:
       - name: Start wp-env
         run: npm run wp-env:start
 
+      - name: Run unit tests
+        run: npm run test:unit
+
       - name: Run Playwright tests
-        run: npm run test
+        run: npm run test:e2e
 
       - name: Upload test artifacts
         if: failure()
