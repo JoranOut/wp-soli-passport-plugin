@@ -1,9 +1,14 @@
 import { defineConfig } from '@playwright/test';
 const baseConfig = require('@wordpress/scripts/config/playwright.config');
 
-// The client site. WP_ENV_PORT/WP_BASE_URL let this run alongside other wp-env projects.
+// The OIDC client lives in the development environment, so these tests target it.
+//
+// WP_BASE_URL is deliberately ignored: `wp-scripts test-playwright` sets it to the *tests*
+// environment's port, and running `npm run test:unit` reinstalls WordPress there - the WP
+// test suite drops and recreates that database, which would wipe the OIDC client settings
+// out from under these tests. SOLI_CLIENT_URL overrides when a different host is needed.
 const baseURL =
-    process.env.WP_BASE_URL ||
+    process.env.SOLI_CLIENT_URL ||
     `http://localhost:${ process.env.WP_ENV_PORT || 8888 }`;
 
 const config = defineConfig({
