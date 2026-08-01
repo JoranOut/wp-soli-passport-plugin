@@ -272,6 +272,20 @@ class RoleSyncTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Assignments must never become readable over the REST API.
+	 *
+	 * They describe which orchestras a named member plays in. Registering the meta key
+	 * with show_in_rest would expose that on /wp/v2/users, so this locks the decision in.
+	 */
+	public function test_assignments_are_not_exposed_over_rest() {
+		$this->assertArrayNotHasKey(
+			Role_Sync::ASSIGNMENTS_META_KEY,
+			get_registered_meta_keys( 'user' ),
+			'Assignments meta must not be registered, which would risk exposing it in REST'
+		);
+	}
+
+	/**
 	 * Users who never signed in through the provider have no assignments.
 	 */
 	public function test_get_assignments_defaults_to_an_empty_list() {

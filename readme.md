@@ -21,6 +21,8 @@ plugin, which handles the OIDC protocol itself.
 - **Role sync**: the `roles` claim from the provider becomes the local WordPress role
 - **Access control**: no granted role means the login is refused and no user is created
 - **Assignments**: the `assignments` claim is stored as user meta for other plugins
+- **Member privacy**: the public `/wp/v2/users` REST routes are hidden from anonymous
+  requests, so synced member names cannot be enumerated
 - **SSO bypass**: `wp-login.php?bypass-sso` for local WordPress login
 - **Error recovery**: a failed SSO login offers a way to sign in as someone else instead of
   bouncing back into a redirect loop
@@ -79,4 +81,5 @@ WP_ENV_PORT=8886 npm run test
 - Initial release
 - Role sync from the provider's `roles` claim, with login refused when no role is granted
 - Assignments stored as user meta
+- Public user REST routes hidden from anonymous requests
 - SSO bypass and error recovery on the login page

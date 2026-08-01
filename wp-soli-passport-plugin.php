@@ -22,6 +22,7 @@ define( 'SOLI_PASSPORT__PLUGIN_DIR_URL', plugin_dir_url( __FILE__ ) );
 define( 'SOLI_PASSPORT__PLUGIN_VERSION', '0.1.0' );
 
 require_once SOLI_PASSPORT__PLUGIN_DIR_PATH . 'includes/class-soli-passport-dependency-checker.php';
+require_once SOLI_PASSPORT__PLUGIN_DIR_PATH . 'includes/class-soli-passport-user-privacy.php';
 
 add_action( 'init', function () {
 	load_plugin_textdomain( 'soli-passport', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
@@ -53,6 +54,10 @@ add_action( 'init', function () {
 // Initialize dependency checker (shows admin notices)
 $soli_passport_dependency_checker = new Dependency_Checker();
 $soli_passport_dependency_checker->init();
+
+// Keep synced member data out of the public user endpoints
+$soli_passport_user_privacy = new User_Privacy();
+$soli_passport_user_privacy->init();
 
 // Sync roles and assignments from the identity provider on OIDC login
 if ( Dependency_Checker::is_oidc_client_active() ) {

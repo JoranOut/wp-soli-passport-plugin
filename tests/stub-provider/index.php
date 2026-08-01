@@ -28,6 +28,32 @@
 
 declare( strict_types = 1 );
 
+/**
+ * Refuse to run anywhere that is not a local test environment.
+ *
+ * publish.js already keeps tests/ out of the release zip, so this should be
+ * unreachable in production. It is here because the cost of being wrong is an
+ * unauthenticated endpoint that hands out signed tokens: if this file ever does end
+ * up on a real host, it must do nothing rather than serve.
+ */
+( static function (): void {
+	$host = strtolower( (string) ( $_SERVER['HTTP_HOST'] ?? '' ) );
+	$host = (string) preg_replace( '/:\d+$/', '', $host );
+
+	$allowed = in_array( $host, array( 'localhost', '127.0.0.1', '[::1]', '::1' ), true )
+		|| str_ends_with( $host, '.test' )
+		|| str_ends_with( $host, '.localhost' );
+
+	if ( $allowed ) {
+		return;
+	}
+
+	http_response_code( 404 );
+	header( 'Content-Type: text/plain' );
+	echo 'Not found.';
+	exit;
+} )();
+
 const STUB_ISSUER        = 'https://stub-provider.test';
 const STUB_CLIENT_ID     = 'soli-dev-client';
 const STUB_CLIENT_SECRET = 'dev-secret-12345';

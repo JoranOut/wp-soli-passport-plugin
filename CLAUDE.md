@@ -122,7 +122,7 @@ development. Anything not listed can stay at its default.
 | `scope` | `openid email profile roles assignments` | Claims are scope-gated |
 | `endpoint_login` | `https://admin.soli.nl/oauth/authorize` | |
 | `endpoint_token` | `https://admin.soli.nl/oauth/token` | |
-| `endpoint_userinfo` | `https://admin.soli.nl/oauth/userinfo` | |
+| `endpoint_userinfo` | *(empty)* | **The provider has no userinfo endpoint** - `/oauth/userinfo` returns 404. Leave it blank and the client reads the claims from the ID token instead, which is where the provider puts them. Filling it in breaks every login. |
 | `endpoint_jwks` | `https://admin.soli.nl/oauth/jwks` | **Required.** Without it the client does not verify token signatures |
 | `endpoint_end_session` | `https://admin.soli.nl/oauth/logout` | Accepts `redirect_uri` for `*.soli.nl` hosts |
 | `link_existing_users` | off | Users are matched on `sub`; linking on email collapses two provider accounts that share an address |
@@ -136,6 +136,29 @@ From the OpenID Connect Generic plugin:
 - `openid-connect-generic-user-creation-test` - do not create a user who may not sign in
 - `openid-connect-generic-update-user-using-current-claim` - apply role and assignments
 - `openid-connect-generic-settings` - disable the SSO redirect for `?bypass-sso` and on errors
+
+## Member Data Exposure
+
+Synced users are real members with real names, which changes what WordPress's defaults give
+away.
+
+`User_Privacy` removes `/wp/v2/users` and `/wp/v2/users/<id>` for **anonymous** requests.
+By default WordPress serves that route publicly and lists every user who has published a
+post, including display name, slug, author archive URL and a hash of their email address.
+Signed-in requests are untouched, so the block editor still works. Opt out with the
+`soli_passport_restrict_rest_users` filter.
+
+The `assignments` user meta is deliberately not registered with `show_in_rest`; there is a
+test asserting it stays that way, because it maps a named member to the orchestras they play
+in.
+
+Still exposed, and worth a decision per site:
+
+- **Author archives.** `/author/<slug>/` remains public. The slug comes from the username,
+  which comes from the `preferred_username` claim - a real name. Only reachable once that
+  user has published content.
+- **Gravatar hashes.** Anywhere WordPress renders an avatar for a logged-out visitor it emits
+  a SHA-256 of the member's email address. That is core behaviour and not fixable here.
 
 ## Reading Assignments From Another Plugin
 
