@@ -83,6 +83,7 @@ tests_add_filter(
 		}
 
 		require_once dirname( __DIR__ ) . '/includes/client/class-soli-passport-role-sync.php';
+		require_once dirname( __DIR__ ) . '/includes/class-soli-passport-user-privacy.php';
 	}
 );
 
