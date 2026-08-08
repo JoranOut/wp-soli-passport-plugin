@@ -2,12 +2,13 @@
 #
 # wp-env setup script
 #
-# Runs after `wp-env start` and configures the development environment (8888) as an
+# Runs after `wp-env start` and configures the development environment (8910) as an
 # OIDC client of the stub provider that is mapped in at /oidc-stub.
 #
-# The tests environment (8889) is only used for PHPUnit and needs no OIDC config.
+# The tests environment (8911) is only used for PHPUnit and needs no OIDC config, but it
+# does need WP_DEBUG - see the env.tests.config block in .wp-env.json for why.
 #
-# Browser-facing endpoints use the published port (8888 by default), server-to-server
+# Browser-facing endpoints use the published port (8910 by default), server-to-server
 # endpoints use localhost (port 80 inside the container). Keeping those apart is what
 # lets this run identically on a laptop and in CI - no cross-container networking and
 # no host.docker.internal involved.
@@ -16,7 +17,7 @@ set -e
 
 # Honour the same port override wp-env itself uses, so this works alongside other
 # wp-env projects: WP_ENV_PORT=8886 npm run wp-env:start
-CLIENT_PORT="${WP_ENV_PORT:-8888}"
+CLIENT_PORT="${WP_ENV_PORT:-8910}"
 
 STUB_BROWSER_BASE="http://localhost:${CLIENT_PORT}/oidc-stub/stub-provider/index.php"
 STUB_INTERNAL_BASE="http://localhost/oidc-stub/stub-provider/index.php"
