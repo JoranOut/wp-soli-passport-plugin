@@ -9,7 +9,7 @@ const baseConfig = require('@wordpress/scripts/config/playwright.config');
 // out from under these tests. SOLI_CLIENT_URL overrides when a different host is needed.
 const baseURL =
     process.env.SOLI_CLIENT_URL ||
-    `http://localhost:${ process.env.WP_ENV_PORT || 8888 }`;
+    `http://localhost:${ process.env.WP_ENV_PORT || 8910 }`;
 
 const config = defineConfig({
     ...baseConfig,

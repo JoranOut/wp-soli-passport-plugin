@@ -1,9 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+	convertDeprecationsToExceptions is off by default in PHPUnit 9.5+, so a PHP
+	deprecation in covered code prints a line and the suite still reports OK. Turning it
+	on is only half of what is needed: WP_DEBUG has to be true in the tests environment
+	as well, because wp_debug_mode() drops E_DEPRECATED and E_NOTICE from
+	error_reporting() when it is false, and PHPUnit's handler never sees them. See the
+	env.tests.config block in .wp-env.json.
+-->
 <phpunit
 	bootstrap="tests/bootstrap.php"
 	backupGlobals="false"
 	colors="true"
 	beStrictAboutTestsThatDoNotTestAnything="false"
+	convertDeprecationsToExceptions="true"
+	convertNoticesToExceptions="true"
+	convertWarningsToExceptions="true"
+	convertErrorsToExceptions="true"
 	>
 	<testsuites>
 		<testsuite name="soli-passport">

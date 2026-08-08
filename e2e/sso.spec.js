@@ -31,6 +31,34 @@ async function wpCli( command ) {
 }
 
 /**
+ * Run a shell command inside the client container.
+ *
+ * @param {string} script Shell snippet to run with `bash -c`.
+ * @return {Promise<string>} Trimmed stdout.
+ */
+async function wpBash( script ) {
+	const { stdout } = await execAsync(
+		`npx wp-env run cli -- bash -c ${ JSON.stringify( script ) }`
+	);
+
+	return stdout
+		.split( '\n' )
+		.filter( ( line ) => ! line.startsWith( 'ℹ' ) && ! line.startsWith( '✔' ) )
+		.join( '\n' )
+		.trim();
+}
+
+const DEBUG_LOG = '/var/www/html/wp-content/debug.log';
+
+/**
+ * PHP diagnostics WordPress writes to debug.log when WP_DEBUG is on.
+ *
+ * The plugin also logs its own `[soli-passport]` lines there on purpose, so this matches
+ * only the `PHP <level>:` prefix the error handler adds.
+ */
+const PHP_DIAGNOSTIC = /PHP (?:Warning|Notice|Fatal error|Parse error|Deprecated|Recoverable fatal error)/;
+
+/**
  * Delete a user on the client so each test starts from a clean slate.
  *
  * @param {string} email Email address of the user to remove.
@@ -145,6 +173,42 @@ test.describe( 'SSO login', () => {
 
 		await expect( page.locator( '#loginform' ) ).toBeVisible();
 		await expect( page.locator( '#user_login' ) ).toBeVisible();
+	} );
+} );
+
+test.describe( 'PHP diagnostics', () => {
+	test( 'the SSO flow runs without PHP warnings, notices or deprecations', async ( {
+		page,
+		request,
+	} ) => {
+		await deleteUser( 'eva.editor@example.com' );
+
+		// Start from an empty log so only this test's requests are judged.
+		await wpBash( `rm -f ${ DEBUG_LOG }` );
+
+		// Walk the request paths this plugin actually hooks into: a front-end render,
+		// the login redirect, the OIDC callback that syncs roles and assignments, an
+		// authenticated admin load, and the anonymous users endpoint User_Privacy filters.
+		await page.goto( '/' );
+		await signInAs( page, 'editor' );
+		await page.goto( '/wp-admin/' );
+		await expect( page.locator( '#wpadminbar' ) ).toBeVisible();
+		await request.get( '/wp-json/wp/v2/users' );
+
+		// A refused login too - that path logs on purpose, so it must stay clean of the
+		// accidental kind.
+		await page.context().clearCookies();
+		await signInAs( page, 'no-access' );
+
+		const log = await wpBash( `cat ${ DEBUG_LOG } 2>/dev/null || true` );
+		const diagnostics = log
+			.split( '\n' )
+			.filter( ( line ) => PHP_DIAGNOSTIC.test( line ) );
+
+		expect(
+			diagnostics,
+			`PHP diagnostics were written to debug.log:\n${ diagnostics.join( '\n' ) }`
+		).toEqual( [] );
 	} );
 } );
 
