@@ -21,6 +21,15 @@
  *   token                 exchanges the code for an id_token
  *   userinfo              returns the same claims for a bearer token
  *
+ * `authorize` also accepts `stub_sign` to weaken how the id_token is signed, so tests can
+ * check that the client actually verifies signatures against the JWKS:
+ *
+ *   valid      (default) RS256, signed with the key the JWKS publishes
+ *   wrong-key  RS256, signed with a key the JWKS does not publish
+ *   alg-none   unsigned, `alg: none`, no signature segment
+ *
+ * The mode travels in the authorization code, so the token endpoint needs no state.
+ *
  * NOT FOR PRODUCTION USE. It performs no real authentication.
  *
  * @package Soli\Passport
@@ -58,6 +67,11 @@ const STUB_ISSUER        = 'https://stub-provider.test';
 const STUB_CLIENT_ID     = 'soli-dev-client';
 const STUB_CLIENT_SECRET = 'dev-secret-12345';
 const STUB_KEY_ID        = 'stub';
+
+/**
+ * Signing modes the stub accepts, see the file docblock.
+ */
+const STUB_SIGN_MODES = array( 'valid', 'wrong-key', 'alg-none' );
 
 /**
  * Base URL the browser uses to reach this stub.
@@ -206,19 +220,30 @@ function stub_filter_claims( array $claims, array $scopes ): array {
 /**
  * Sign an ID token with RS256.
  *
- * @param array $claims Token claims.
+ * @param array  $claims Token claims.
+ * @param string $mode   Signing mode, one of STUB_SIGN_MODES.
  * @return string Compact JWS.
  */
-function stub_sign_id_token( array $claims ): string {
+function stub_sign_id_token( array $claims, string $mode = 'valid' ): string {
 	$header = array(
 		'typ' => 'JWT',
-		'alg' => 'RS256',
+		'alg' => ( 'alg-none' === $mode ) ? 'none' : 'RS256',
 		'kid' => STUB_KEY_ID,
 	);
 
 	$signing_input = stub_b64u( (string) json_encode( $header ) ) . '.' . stub_b64u( (string) json_encode( $claims ) );
 
-	$key = openssl_pkey_get_private( stub_key( 'private' ) );
+	// Unsigned: three segments, the last one empty. A client that reads the payload
+	// anyway trusts claims anyone could have written.
+	if ( 'alg-none' === $mode ) {
+		return $signing_input . '.';
+	}
+
+	// wrong-key signs with a key the JWKS does not publish, so the signature is
+	// well-formed but unverifiable.
+	$pem = stub_key( 'wrong-key' === $mode ? 'wrong-private' : 'private' );
+
+	$key = openssl_pkey_get_private( $pem );
 
 	if ( false === $key ) {
 		stub_error( 'server_error', 'Could not read the stub private key', 500 );
@@ -306,6 +331,11 @@ function stub_handle_authorize() {
 	$nonce = (string) ( $_GET['nonce'] ?? '' );
 	$scope = (string) ( $_GET['scope'] ?? 'openid' );
 	$user  = (string) ( $_GET['stub_user'] ?? '' );
+	$sign  = (string) ( $_GET['stub_sign'] ?? 'valid' );
+
+	if ( ! in_array( $sign, STUB_SIGN_MODES, true ) ) {
+		stub_error( 'invalid_request', 'Unknown stub_sign mode: ' . $sign );
+	}
 
 	$fixtures = stub_fixtures();
 
@@ -321,6 +351,7 @@ function stub_handle_authorize() {
 					'user'  => $user,
 					'scope' => $scope,
 					'nonce' => $nonce,
+					'sign'  => $sign,
 				)
 			)
 		);
@@ -346,6 +377,7 @@ function stub_handle_authorize() {
 		'state'        => $state,
 		'nonce'        => $nonce,
 		'scope'        => $scope,
+		'stub_sign'    => $sign,
 	);
 
 	echo '<!doctype html><html lang="en"><head><meta charset="utf-8">';
@@ -403,6 +435,12 @@ function stub_handle_token() {
 		stub_error( 'invalid_grant', 'Unknown stub user: ' . $user );
 	}
 
+	$sign = (string) ( $payload['sign'] ?? 'valid' );
+
+	if ( ! in_array( $sign, STUB_SIGN_MODES, true ) ) {
+		stub_error( 'invalid_grant', 'Unknown stub_sign mode: ' . $sign );
+	}
+
 	$scopes = array_values( array_filter( explode( ' ', (string) ( $payload['scope'] ?? 'openid' ) ) ) );
 	$claims = stub_filter_claims( $fixtures[ $user ], $scopes );
 
@@ -438,7 +476,7 @@ function stub_handle_token() {
 			'token_type'   => 'Bearer',
 			'expires_in'   => 3600,
 			'scope'        => implode( ' ', $scopes ),
-			'id_token'     => stub_sign_id_token( $id_token_claims ),
+			'id_token'     => stub_sign_id_token( $id_token_claims, $sign ),
 		)
 	);
 }
