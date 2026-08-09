@@ -128,6 +128,20 @@ development. Anything not listed can stay at its default.
 | `link_existing_users` | off | Users are matched on `sub`; linking on email collapses two provider accounts that share an address |
 | `login_type` | `auto` | Redirect straight to the provider |
 
+### Two Provider Accounts, One Email Address
+
+`sub` is the only identity key, but WordPress still reserves an email address for a
+single user. So when two provider accounts share an address - one household, one mailbox,
+which happens - the first one to sign in gets the local user and the second is refused
+with `login-error=failed-user-creation`. There is an e2e test pinning that, because the
+alternative is worse: with `link_existing_users` on, the second account would be handed
+the first account's WordPress user, its `sub` mapping and its role. That is a takeover,
+and the test fails loudly if the setting ever flips.
+
+The refusal is a fail-closed outcome, not a fixed one. If a member ever needs it, the fix
+belongs in the provider (a unique address per account) or in `email_format`, not in
+linking on email.
+
 ## Hooks Used
 
 From the OpenID Connect Generic plugin:
@@ -194,6 +208,29 @@ WordPress site at `/oidc-stub/`. Being same-origin is the point: browser-facing 
 the published port and server-to-server endpoints use `localhost` inside the container, so
 there is no cross-container networking and nothing depends on `host.docker.internal`. Its
 accounts are the fixture entries; `#stub-user-<key>` picks one.
+
+The stub also signs badly on request, so the tests can check that `endpoint_jwks` is doing
+something. Add `stub_sign` to the authorize URL:
+
+| `stub_sign` | id_token |
+|-------------|----------|
+| `valid` (default) | RS256, signed with the key the JWKS publishes |
+| `wrong-key` | RS256, signed with a key the JWKS does not publish |
+| `alg-none` | `alg: none`, no signature at all |
+
+Both bad modes must end at `login-error=jwt-verification-failed` with no session and no
+local user. Empty `endpoint_jwks` and they sign straight in, which is what the tests exist
+to catch.
+
+A few fixture entries are related to each other on purpose - `shared-email-*` are two
+accounts with one address, `role-revoked-*` are one account whose role shrank. `RoleSyncTest`
+asserts those relations, because an e2e test built on them passes while testing nothing if
+someone "tidies up" a `sub`.
+
+REST requests in the tests use `?rest_route=`; pretty `/wp-json/` routes are not rewritten
+in the wp-env container. Cookie authentication on those requests also needs an `X-WP-Nonce`
+header, which is why the members' side of the `User_Privacy` test reads the nonce from
+wp-admin first.
 
 Run alongside another wp-env project with `WP_ENV_PORT` / `WP_ENV_TESTS_PORT`; nothing
 hardcodes a port.

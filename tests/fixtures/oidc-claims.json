@@ -1,5 +1,5 @@
 {
-  "_comment": "Golden claim fixtures mirroring App\\OpenId\\SoliIdentityEntity::getClaims() in laravel-soli-administration. Shared by the PHPUnit suite and the stub provider so both test against the same contract. Keep in sync with the provider; a change there should break a test here.",
+  "_comment": "Golden claim fixtures mirroring App\\OpenId\\SoliIdentityEntity::getClaims() in laravel-soli-administration. Shared by the PHPUnit suite and the stub provider so both test against the same contract. Keep in sync with the provider; a change there should break a test here. Some entries are deliberately related to each other: 'shared-email-*' are two provider accounts with different subs and one email address, and 'role-revoked-before'/'role-revoked-after' are one account whose granted role changed. Those relations are asserted in RoleSyncTest, because the e2e tests are meaningless without them.",
 
   "editor": {
     "sub": "11",
@@ -70,5 +70,53 @@
     "family_name": "ScopeLess",
     "email": "sam.scopeless@example.com",
     "email_verified": true
+  },
+
+  "shared-email-first": {
+    "sub": "16",
+    "name": "Ariane Shared",
+    "preferred_username": "Ariane Shared",
+    "given_name": "Ariane",
+    "family_name": "Shared",
+    "email": "shared.family@example.com",
+    "email_verified": true,
+    "roles": [ "editor" ],
+    "assignments": []
+  },
+
+  "shared-email-second": {
+    "sub": "17",
+    "name": "Bram Shared",
+    "preferred_username": "Bram Shared",
+    "given_name": "Bram",
+    "family_name": "Shared",
+    "email": "shared.family@example.com",
+    "email_verified": true,
+    "roles": [ "subscriber" ],
+    "assignments": []
+  },
+
+  "role-revoked-before": {
+    "sub": "18",
+    "name": "Rik Revoked",
+    "preferred_username": "Rik Revoked",
+    "given_name": "Rik",
+    "family_name": "Revoked",
+    "email": "rik.revoked@example.com",
+    "email_verified": true,
+    "roles": [ "administrator" ],
+    "assignments": []
+  },
+
+  "role-revoked-after": {
+    "sub": "18",
+    "name": "Rik Revoked",
+    "preferred_username": "Rik Revoked",
+    "given_name": "Rik",
+    "family_name": "Revoked",
+    "email": "rik.revoked@example.com",
+    "email_verified": true,
+    "roles": [ "subscriber" ],
+    "assignments": []
   }
 }

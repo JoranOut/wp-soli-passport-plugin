@@ -81,6 +81,42 @@ class RoleSyncTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The shared-email pair must stay two accounts with one address.
+	 *
+	 * The e2e test built on it checks that they never collapse into a single
+	 * WordPress user. Give them the same sub, or different addresses, and it would
+	 * still pass while testing nothing.
+	 */
+	public function test_shared_email_fixtures_are_two_accounts_with_one_address() {
+		$first  = $this->claims( 'shared-email-first' );
+		$second = $this->claims( 'shared-email-second' );
+
+		$this->assertNotSame( $first['sub'], $second['sub'], 'The pair must be two provider accounts' );
+		$this->assertSame( $first['email'], $second['email'], 'The pair must share one email address' );
+		$this->assertNotSame(
+			$first['preferred_username'],
+			$second['preferred_username'],
+			'Two people, so two usernames - sub is the only identity key'
+		);
+	}
+
+	/**
+	 * The revocation pair must stay one account whose granted role shrank.
+	 *
+	 * Same reasoning: a different sub would make the e2e de-escalation test create a
+	 * second user and assert nothing about revocation.
+	 */
+	public function test_role_revocation_fixtures_are_one_account_losing_a_role() {
+		$before = $this->claims( 'role-revoked-before' );
+		$after  = $this->claims( 'role-revoked-after' );
+
+		$this->assertSame( $before['sub'], $after['sub'], 'Both must be the same provider account' );
+		$this->assertSame( array( 'administrator' ), $before['roles'] );
+		$this->assertNotContains( 'administrator', $after['roles'], 'The elevated role must be gone' );
+		$this->assertNotEmpty( $after['roles'], 'A revoked login would never reach the role sync' );
+	}
+
+	/**
 	 * A granted role that exists in WordPress resolves to that role.
 	 */
 	public function test_resolve_role_returns_the_granted_role() {
@@ -165,6 +201,25 @@ class RoleSyncTest extends WP_UnitTestCase {
 		$this->role_sync->sync_from_claim( $user, $this->claims( 'editor' ) );
 
 		$this->assertSame( array( 'editor' ), array_values( get_userdata( $user->ID )->roles ) );
+	}
+
+	/**
+	 * A role the provider took away is taken away locally, capabilities included.
+	 *
+	 * The provider is the only place roles are decided, so a demotion there has to
+	 * land here. Keeping a stale administrator would be the worst version of getting
+	 * this wrong.
+	 */
+	public function test_sync_removes_a_role_the_provider_revoked() {
+		$user = $this->factory->user->create_and_get( array( 'role' => 'administrator' ) );
+
+		$this->role_sync->sync_from_claim( $user, $this->claims( 'role-revoked-after' ) );
+
+		$fresh = get_userdata( $user->ID );
+
+		$this->assertSame( array( 'subscriber' ), array_values( $fresh->roles ) );
+		$this->assertFalse( $fresh->has_cap( 'manage_options' ), 'The administrator capability must be gone' );
+		$this->assertFalse( $fresh->has_cap( 'edit_others_posts' ) );
 	}
 
 	/**

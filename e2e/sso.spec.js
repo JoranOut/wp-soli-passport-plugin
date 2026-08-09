@@ -59,6 +59,14 @@ const DEBUG_LOG = '/var/www/html/wp-content/debug.log';
 const PHP_DIAGNOSTIC = /PHP (?:Warning|Notice|Fatal error|Parse error|Deprecated|Recoverable fatal error)/;
 
 /**
+ * Meta key the OIDC client plugin stores the 'sub' claim in.
+ *
+ * It is the only thing tying a WordPress user to a provider account, so it is what
+ * the identity tests read.
+ */
+const SUBJECT_IDENTITY_META = 'openid-connect-generic-subject-identity';
+
+/**
  * Delete a user on the client so each test starts from a clean slate.
  *
  * @param {string} email Email address of the user to remove.
@@ -68,18 +76,58 @@ async function deleteUser( email ) {
 }
 
 /**
+ * Read the provider identity a local user is mapped to.
+ *
+ * @param {string} user Anything WP-CLI accepts as a user: ID, login or email.
+ * @return {Promise<string>} The 'sub' value, empty when the user was never mapped.
+ */
+async function subjectIdentity( user ) {
+	return wpCli( `user meta get ${ user } ${ SUBJECT_IDENTITY_META }` );
+}
+
+/**
+ * The session cookies WordPress sets for a signed-in user.
+ *
+ * @param {import('@playwright/test').Page} page Playwright page.
+ * @return {Promise<Array>} Matching cookies; empty means no session.
+ */
+async function sessionCookies( page ) {
+	const cookies = await page.context().cookies();
+
+	return cookies.filter( ( cookie ) => cookie.name.startsWith( 'wordpress_logged_in' ) );
+}
+
+/**
  * Sign in through the stub provider as one of the fixture accounts.
  *
- * @param {import('@playwright/test').Page} page      Playwright page.
- * @param {string}                          fixtureKey Fixture account key.
+ * @param {import('@playwright/test').Page} page          Playwright page.
+ * @param {string}                          fixtureKey    Fixture account key.
+ * @param {Object}                          [options]     Options.
+ * @param {string}                          [options.sign] Stub signing mode, see
+ *                                                         tests/stub-provider/index.php.
+ *                                                         Omit for a valid signature.
  */
-async function signInAs( page, fixtureKey ) {
+async function signInAs( page, fixtureKey, { sign } = {} ) {
 	await page.goto( '/wp-login.php' );
 
 	// login_type is 'auto', so the client redirects straight to the provider.
 	await expect( page ).toHaveURL( new RegExp( STUB_PATH.replace( /\./g, '\\.' ) ) );
 
-	await page.locator( `#stub-user-${ fixtureKey }` ).click();
+	const account = page.locator( `#stub-user-${ fixtureKey }` );
+
+	if ( sign ) {
+		// Follow the picker's own link so the client's state and nonce are kept, and
+		// only change how the stub signs the id_token.
+		const href = await account.getAttribute( 'href' );
+
+		// Fail loudly rather than silently signing in with a valid token, which would
+		// make the signature tests pass for the wrong reason.
+		expect( href ).toContain( 'stub_sign=valid' );
+
+		await page.goto( href.replace( 'stub_sign=valid', `stub_sign=${ sign }` ) );
+	} else {
+		await account.click();
+	}
 
 	// The redirect chain back through the client's callback must finish before the
 	// test looks at cookies or navigates away.
@@ -176,6 +224,157 @@ test.describe( 'SSO login', () => {
 	} );
 } );
 
+test.describe( 'identity and roles', () => {
+	const SHARED_EMAIL = 'shared.family@example.com';
+	const REVOKED_EMAIL = 'rik.revoked@example.com';
+
+	test.beforeEach( async ( { context } ) => {
+		await context.clearCookies();
+	} );
+
+	test( 'two provider accounts sharing an email address stay separate', async ( {
+		page,
+	} ) => {
+		await deleteUser( SHARED_EMAIL );
+
+		// The first account signs in and owns the local user for that address.
+		await signInAs( page, 'shared-email-first' );
+		await page.goto( '/wp-admin/' );
+		await expect( page.locator( '#wpadminbar' ) ).toBeVisible();
+
+		const firstUser = await wpCli( `user get ${ SHARED_EMAIL } --field=ID` );
+		expect( await subjectIdentity( firstUser ) ).toBe( '16' );
+		expect( await wpCli( `user get ${ firstUser } --field=roles` ) ).toBe( 'editor' );
+
+		// A second provider account - different sub, same email address. Members of
+		// one household really do share one.
+		await page.context().clearCookies();
+		await signInAs( page, 'shared-email-second' );
+
+		// It gets no session, and above all not the first account's.
+		expect( await sessionCookies( page ) ).toEqual( [] );
+
+		// The first account is untouched. This is what 'link_existing_users: off'
+		// buys: with linking on, sub 17 would take over sub 16's user here and be
+		// handed their role.
+		expect( await subjectIdentity( firstUser ) ).toBe( '16' );
+		expect( await wpCli( `user get ${ firstUser } --field=roles` ) ).toBe( 'editor' );
+		expect( await wpCli( `user get ${ firstUser } --field=user_email` ) ).toBe(
+			SHARED_EMAIL
+		);
+
+		// WordPress reserves an email address for one user, so the second account is
+		// refused outright rather than merged into the first.
+		await expect( page ).toHaveURL( /login-error=failed-user-creation/ );
+
+		const emails = ( await wpCli( 'user list --field=user_email' ) ).split( '\n' );
+		expect(
+			emails.filter( ( email ) => email.trim() === SHARED_EMAIL )
+		).toHaveLength( 1 );
+	} );
+
+	test( 'a role revoked at the provider is removed on the next login', async ( {
+		page,
+	} ) => {
+		await deleteUser( REVOKED_EMAIL );
+
+		// The provider grants administrator, and the local user really becomes one.
+		await signInAs( page, 'role-revoked-before' );
+		expect( await wpCli( `user get ${ REVOKED_EMAIL } --field=roles` ) ).toBe(
+			'administrator'
+		);
+
+		const asAdmin = await page.goto( '/wp-admin/users.php' );
+		expect( asAdmin.status() ).toBe( 200 );
+
+		// Same account, same sub, but the provider no longer grants that role.
+		await page.context().clearCookies();
+		await signInAs( page, 'role-revoked-after' );
+
+		expect( await wpCli( `user get ${ REVOKED_EMAIL } --field=roles` ) ).toBe(
+			'subscriber'
+		);
+		expect(
+			await wpCli( 'user list --role=administrator --field=user_email' )
+		).not.toContain( REVOKED_EMAIL );
+
+		// The capability is gone with it, not just the role label.
+		const asSubscriber = await page.goto( '/wp-admin/users.php' );
+		expect( asSubscriber.status() ).toBe( 403 );
+		await expect( page.locator( 'body' ) ).toContainText(
+			'not allowed to list users'
+		);
+	} );
+} );
+
+test.describe( 'id_token signature verification', () => {
+	const EDITOR_EMAIL = 'eva.editor@example.com';
+
+	// Both cases would sign in if the client stopped checking signatures against the
+	// JWKS - the claims themselves are the ones that normally grant editor.
+	const CASES = [
+		[ 'wrong-key', 'signed with a key the provider does not publish', 'Signature+verification+failed' ],
+		[ 'alg-none', 'not signed at all', 'Algorithm+not+supported' ],
+	];
+
+	test.beforeEach( async ( { context } ) => {
+		await context.clearCookies();
+	} );
+
+	for ( const [ mode, description, expectedMessage ] of CASES ) {
+		test( `an id_token ${ description } is refused`, async ( { page } ) => {
+			await deleteUser( EDITOR_EMAIL );
+
+			await signInAs( page, 'editor', { sign: mode } );
+
+			await expect( page ).toHaveURL( /login-error=jwt-verification-failed/ );
+			expect( page.url() ).toContain( expectedMessage );
+
+			// No session, and no local user for a token nobody can vouch for.
+			expect( await sessionCookies( page ) ).toEqual( [] );
+			expect( await wpCli( 'user list --field=user_email' ) ).not.toContain(
+				EDITOR_EMAIL
+			);
+		} );
+	}
+} );
+
+test.describe( 'public user endpoints', () => {
+	// Pretty REST routes are not rewritten in the wp-env container, so the tests use
+	// the query form. It goes through the same rest_endpoints filter.
+	const USERS_ROUTE = '/?rest_route=/wp/v2/users';
+
+	test.beforeEach( async ( { context } ) => {
+		await context.clearCookies();
+	} );
+
+	test( 'the users route is gone for anonymous requests but not for members', async ( {
+		page,
+		request,
+	} ) => {
+		await deleteUser( 'eva.editor@example.com' );
+
+		// The `request` fixture carries no session, unlike `page.request`.
+		const anonymous = await request.get( USERS_ROUTE );
+		expect( anonymous.status() ).toBe( 404 );
+		expect( ( await anonymous.json() ).code ).toBe( 'rest_no_route' );
+
+		await signInAs( page, 'editor' );
+
+		// WordPress ignores the session cookie on REST requests without a nonce, so
+		// take the one wp-admin hands to the block editor - that is the caller this
+		// restriction must not break.
+		await page.goto( '/wp-admin/post-new.php' );
+		const nonce = await page.evaluate( () => window.wpApiSettings.nonce );
+		expect( nonce ).toBeTruthy();
+
+		const member = await page.request.get( USERS_ROUTE, {
+			headers: { 'X-WP-Nonce': nonce },
+		} );
+		expect( member.status() ).toBe( 200 );
+	} );
+} );
+
 test.describe( 'PHP diagnostics', () => {
 	test( 'the SSO flow runs without PHP warnings, notices or deprecations', async ( {
 		page,
@@ -193,7 +392,8 @@ test.describe( 'PHP diagnostics', () => {
 		await signInAs( page, 'editor' );
 		await page.goto( '/wp-admin/' );
 		await expect( page.locator( '#wpadminbar' ) ).toBeVisible();
-		await request.get( '/wp-json/wp/v2/users' );
+		// Query form, because pretty REST routes are not rewritten in the container.
+		await request.get( '/?rest_route=/wp/v2/users' );
 
 		// A refused login too - that path logs on purpose, so it must stay clean of the
 		// accidental kind.
