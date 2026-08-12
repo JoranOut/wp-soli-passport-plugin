@@ -73,7 +73,11 @@ wp-soli-passport-plugin/
 │   ├── stub-provider/                     # Fake OIDC provider for tests
 │   └── unit/RoleSyncTest.php
 ├── languages/
-└── e2e/sso.spec.js
+└── e2e/
+    ├── helpers.js                          # expectNoPhpDiagnostics, restUrl, loginAsAdmin
+    ├── debug-mode.spec.js                  # guards WP_DEBUG / WP_DEBUG_DISPLAY
+    ├── php-errors.spec.js                  # rendered-page diagnostics
+    └── sso.spec.js                         # full browser SSO flow
 ```
 
 There is no database schema, no admin page and no build step. Anything that looks like it
@@ -231,6 +235,45 @@ REST requests in the tests use `?rest_route=`; pretty `/wp-json/` routes are not
 in the wp-env container. Cookie authentication on those requests also needs an `X-WP-Nonce`
 header, which is why the members' side of the `User_Privacy` test reads the nonce from
 wp-admin first.
+
+This holds **even though `.wp-env-setup.sh` runs `wp rewrite structure`** - that writes
+`.htaccess`, but the container's Apache does not honour it. Measured: `/wp-json/wp/v2/types`
+returns 404 while `/?rest_route=/wp/v2/types` returns 200. The 404 comes from Apache and
+never enters WordPress, so an "expect 404" assertion against `/wp-json/` passes for entirely
+the wrong reason. Use `helpers.js`'s `restUrl()` and never hand-write a `/wp-json/` path.
+
+### PHP Diagnostics
+
+Two independent nets, both needed:
+
+- **`php-errors.spec.js`** reads diagnostics out of the *rendered page* via
+  `expectNoPhpDiagnostics()`. Fatals and parse errors are matched unscoped; warnings,
+  notices and deprecations only when the file they name belongs to this repo, because
+  `daggerhart-openid-connect-generic` is installed alongside and its deprecations are not
+  ours to fix. It covers only paths reachable **without a token exchange**; the callback and
+  role sync are left to `sso.spec.js`.
+- **`sso.spec.js`** reads `debug.log` after driving the whole SSO flow. That is the stronger
+  check for the server-to-server token call, which no browser renders.
+
+Both are worthless unless the environment lets diagnostics through, hence
+`debug-mode.spec.js`. Note the asymmetry in `.wp-env.json`, which is deliberate:
+
+| Environment | `WP_DEBUG` | `WP_DEBUG_DISPLAY` | Why |
+|-------------|-----------|--------------------|-----|
+| `development` (8910) | true | **true** | Playwright runs here; display is what puts diagnostics in the page |
+| `tests` (8911) | true | false | PHPUnit only - nothing HTTP-facing, and display just interleaves noise into the output |
+
+`WP_DEBUG` must be set under `env.<name>.config`, not only at the root: wp-env's own
+`DEFAULT_CONFIG` sets `env.tests.config.WP_DEBUG = false`, and environment-specific defaults
+beat the root-level `config`. `WP_DEBUG_LOG` and `WP_DEBUG_DISPLAY` *do* carry over from the
+root, which makes a root-only config look correct while `WP_DEBUG` is quietly off - and with
+it off, `wp_debug_mode()` never touches `display_errors`, so **no diagnostic of any severity,
+not even a fatal, reaches the page** and every assertion passes vacuously.
+
+For PHPUnit, `WP_DEBUG` is necessary but not sufficient: PHPUnit 9.5+ defaults
+`convertDeprecationsToExceptions` to false, so a deprecation prints and the suite still
+reports `OK`. `phpunit.xml.dist` sets all four `convert*ToExceptions` attributes. Verified by
+injecting `strlen( null )` into `Role_Sync::get_assignments()`: `Errors: 5`, not a silent OK.
 
 Run alongside another wp-env project with `WP_ENV_PORT` / `WP_ENV_TESTS_PORT`; nothing
 hardcodes a port.

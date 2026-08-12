@@ -5,7 +5,7 @@
  * Stands in for the real identity provider (admin.soli.nl, Laravel Passport) so the
  * client can be tested without a second WordPress, a database or any cross-container
  * networking. It is mapped into the WordPress container at /oidc-stub and reachable
- * both from the browser (http://localhost:8888/oidc-stub/) and from PHP inside the
+ * both from the browser (http://localhost:8910/oidc-stub/) and from PHP inside the
  * container (http://localhost/oidc-stub/).
  *
  * It deliberately mirrors the real provider's scope-gated claim contract: omit the

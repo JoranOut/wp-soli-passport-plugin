@@ -16,7 +16,10 @@
   "env": {
     "development": {
       "config": {
-        "WP_MEMORY_LIMIT": "512M"
+        "WP_MEMORY_LIMIT": "512M",
+        "WP_DEBUG": true,
+        "WP_DEBUG_LOG": true,
+        "WP_DEBUG_DISPLAY": true
       },
       "mappings": {
         "oidc-stub": "./tests"
