@@ -14,7 +14,48 @@ jobs:
     # Skip release PRs - they need manual merge to trigger release workflow
     if: ${{ !startsWith(github.head_ref, 'release/') }}
     steps:
+      # `gh pr merge --auto` refuses a pull request whose check suite has not
+      # settled yet, failing with "GraphQL: Pull request is in unstable status".
+      # This job runs on `opened`, so it races the PR's checks being registered
+      # and loses that race intermittently. Retry with backoff instead of a fixed
+      # sleep: a sleep is a guess that still races on a slow runner, and it always
+      # pays its full cost on the runs that would have succeeded immediately.
+      #
+      # The retry is bounded and the step fails if auto-merge is never enabled -
+      # never make this step `continue-on-error`, because a genuinely broken
+      # auto-merge (a revoked permission, auto-merge disabled on the repository)
+      # would then pass silently and every PR would sit unmerged unnoticed.
       - name: Enable auto-merge
-        run: gh pr merge ${{ github.event.pull_request.number }} --auto --merge --repo ${{ github.repository }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ATTEMPTS: '6'
+        run: |
+          delay=10
+
+          for attempt in $( seq 1 "$ATTEMPTS" ); do
+            if gh pr merge "$PR_NUMBER" --auto --merge --repo "$GITHUB_REPOSITORY"; then
+              echo "Auto-merge enabled for #${PR_NUMBER} on attempt ${attempt}."
+              exit 0
+            fi
+
+            # A pull request that merged or closed while we were retrying needs
+            # nothing further; anything else is retried until ATTEMPTS runs out.
+            state=$( gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq .state || echo UNKNOWN )
+            if [ "$state" = "MERGED" ] || [ "$state" = "CLOSED" ]; then
+              echo "Pull request #${PR_NUMBER} is ${state}; nothing to enable."
+              exit 0
+            fi
+
+            if [ "$attempt" -lt "$ATTEMPTS" ]; then
+              echo "Attempt ${attempt} failed (pull request state: ${state}); retrying in ${delay}s."
+              sleep "$delay"
+              delay=$(( delay * 2 ))
+              if [ "$delay" -gt 60 ]; then
+                delay=60
+              fi
+            fi
+          done
+
+          echo "::error::Could not enable auto-merge on #${PR_NUMBER} after ${ATTEMPTS} attempts."
+          exit 1
